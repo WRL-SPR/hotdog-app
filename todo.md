@@ -48,3 +48,18 @@
 - [x] Final code review and cleanup
 - [x] Create checkpoint for deployment
 - [x] Deliver project to user
+
+
+## Phase 8: Stripe Payment Integration
+- [ ] Set up Stripe integration with webdev_add_feature
+- [ ] Create subscription plans table in database
+- [ ] Create user subscriptions table
+- [ ] Create payment history table
+- [ ] Implement Stripe webhook handler for payment events
+- [ ] Create tRPC procedure for creating checkout sessions
+- [ ] Create tRPC procedure for managing subscriptions
+- [ ] Create tRPC procedure for checking user subscription status
+- [ ] Build subscription pricing page
+- [ ] Build user subscription management page
+- [ ] Add premium feature gates based on subscription status
+- [ ] Test payment flow end-to-end
