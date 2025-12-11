@@ -1,11 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, predictions, comments, upvotes, notifications, InsertPrediction, InsertComment, InsertUpvote, InsertNotification } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -89,4 +88,169 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Prediction queries
+export async function createPrediction(prediction: InsertPrediction) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db.insert(predictions).values(prediction);
+  return result;
+}
+
+export async function getPredictions(filter?: 'hotdog' | 'not-hotdog') {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  let query = db
+    .select({
+      prediction: predictions,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+      upvoteCount: sql<number>`(SELECT COUNT(*) FROM ${upvotes} WHERE ${upvotes.predictionId} = ${predictions.id})`,
+      commentCount: sql<number>`(SELECT COUNT(*) FROM ${comments} WHERE ${comments.predictionId} = ${predictions.id})`,
+    })
+    .from(predictions)
+    .leftJoin(users, eq(predictions.userId, users.id))
+    .orderBy(desc(predictions.createdAt));
+  
+  if (filter === 'hotdog') {
+    query = query.where(eq(predictions.isHotDog, true)) as any;
+  } else if (filter === 'not-hotdog') {
+    query = query.where(eq(predictions.isHotDog, false)) as any;
+  }
+  
+  return await query;
+}
+
+export async function getPredictionById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db
+    .select({
+      prediction: predictions,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+      upvoteCount: sql<number>`(SELECT COUNT(*) FROM ${upvotes} WHERE ${upvotes.predictionId} = ${predictions.id})`,
+      commentCount: sql<number>`(SELECT COUNT(*) FROM ${comments} WHERE ${comments.predictionId} = ${predictions.id})`,
+    })
+    .from(predictions)
+    .leftJoin(users, eq(predictions.userId, users.id))
+    .where(eq(predictions.id, id))
+    .limit(1);
+  
+  return result.length > 0 ? result[0] : null;
+}
+
+// Comment queries
+export async function createComment(comment: InsertComment) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db.insert(comments).values(comment);
+  return result;
+}
+
+export async function getCommentsByPredictionId(predictionId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  return await db
+    .select({
+      comment: comments,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+    })
+    .from(comments)
+    .leftJoin(users, eq(comments.userId, users.id))
+    .where(eq(comments.predictionId, predictionId))
+    .orderBy(desc(comments.createdAt));
+}
+
+// Upvote queries
+export async function toggleUpvote(predictionId: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const existing = await db
+    .select()
+    .from(upvotes)
+    .where(and(eq(upvotes.predictionId, predictionId), eq(upvotes.userId, userId)))
+    .limit(1);
+  
+  if (existing.length > 0) {
+    await db.delete(upvotes).where(eq(upvotes.id, existing[0].id));
+    return { action: 'removed' as const };
+  } else {
+    await db.insert(upvotes).values({ predictionId, userId });
+    return { action: 'added' as const };
+  }
+}
+
+export async function hasUserUpvoted(predictionId: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db
+    .select()
+    .from(upvotes)
+    .where(and(eq(upvotes.predictionId, predictionId), eq(upvotes.userId, userId)))
+    .limit(1);
+  
+  return result.length > 0;
+}
+
+// Notification queries
+export async function createNotification(notification: InsertNotification) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db.insert(notifications).values(notification);
+  return result;
+}
+
+export async function getNotificationsByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  return await db
+    .select({
+      notification: notifications,
+      actor: {
+        id: users.id,
+        name: users.name,
+      },
+    })
+    .from(notifications)
+    .leftJoin(users, eq(notifications.actorId, users.id))
+    .where(eq(notifications.userId, userId))
+    .orderBy(desc(notifications.createdAt));
+}
+
+export async function markNotificationAsRead(notificationId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.update(notifications).set({ isRead: true }).where(eq(notifications.id, notificationId));
+}
+
+export async function getUnreadNotificationCount(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(notifications)
+    .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
+  
+  return result[0]?.count ?? 0;
+}
